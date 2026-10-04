@@ -1,0 +1,30 @@
+Package: CausalBoundsR
+Type: Package
+Title: Partial identification for discrete variables using a fast LP method
+Version: 0.1.0
+Authors@R: c(
+    person(
+      "Khaled", "Aboulazm",
+      email = "aboulazm@leibniz-bips.de",
+      role = c("aut", "cre")
+    )
+  )
+Description: Implements column generation LP via the HiGHS solver to compute non-parametric partial identification bounds for Average Causal Effect.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Suggests:
+    knitr,
+    rmarkdown,
+    parallel
+VignetteBuilder: knitr
+BuildVignettes: false
+Roxygen: list(markdown = TRUE)
+Imports:
+    dplyr,
+    tidyr,
+    Matrix,
+    highs,
+    rlang,
+    methods
+Config/roxygen2/version: 8.0.0

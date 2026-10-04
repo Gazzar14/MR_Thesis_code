@@ -1,0 +1,474 @@
+---
+title: "Fast IV Bounds"
+format: html
+editor: visual
+---
+
+```{r}
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(splines) # For modeling the continuous observational curve
+library(highs)
+set.seed(123)
+```
+
+# Data Generation
+
+We first consider a case with a fully discrete setting
+
+```{r}
+datagen_discrete_iv_singleZ <- function(
+  n = 2000,
+  z_levels = 2,
+  x_levels = 2,
+  y_levels = 2,
+  b_zx = 0.8,            
+  b_ux = 0.3,
+  b_uy = 0.3,
+  b_uz = 0,
+  b_zy = 0,            
+  x_intercept = 0,
+  y_intercept = 0,
+  shape = c("linear", "nonlinear_monotone", "non_monotone"),
+  x_cuts = NULL,
+  y_cuts = NULL
+) {
+  shape <- match.arg(shape)
+
+  make_cuts <- function(k) {
+    if (k == 2) 0 else qnorm(seq(1 / k, (k - 1) / k, length.out = k - 1))
+  }
+
+  if (is.null(x_cuts)) x_cuts <- make_cuts(x_levels)
+  if (is.null(y_cuts)) y_cuts <- make_cuts(y_levels)
+
+  U <- rnorm(n)
+
+  if (b_uz == 0) {
+    Z <- sample(seq_len(z_levels), n, replace = TRUE)
+  } else {
+    Z_star <- b_uz * U + rnorm(n)
+    z_cuts <- qnorm(seq(1 / z_levels, (z_levels - 1) / z_levels, length.out = z_levels - 1))
+    Z <- findInterval(Z_star, z_cuts) + 1
+  }
+
+  # Deterministic centering instead of scale() to preserve I.I.D.
+  Z_centered <- Z - mean(seq_len(z_levels))
+
+  f_x <- function(val) {
+    if (shape == "linear") {
+      0.6 * val
+    } else if (shape == "nonlinear_monotone") {
+      0.25 * val^2
+    } else {
+      # Fixed to ensure it actually has an effect even if x_levels == 2
+      if (x_levels == 2) {
+        ifelse(val == 1, 0, 1) # Force an effect
+      } else {
+        mid <- (x_levels + 1) / 2
+        -0.5 * (val - mid)^2
+      }
+    }
+  }
+
+  # Reduced noise: multiplied rlogis by 0.5 to strengthen the IV bounds testing
+  X_star <- x_intercept + b_zx * Z_centered + b_ux * U + 0.5 * rlogis(n)
+  X <- as.integer(findInterval(X_star, x_cuts) + 1)
+
+  Y_star <- y_intercept + f_x(X) + b_uy * U + b_zy * Z_centered + 0.5 * rlogis(n)
+  Y <- as.integer(findInterval(Y_star, y_cuts) + 1)
+
+  data.frame(
+    Z = Z,
+    U = U,
+    X = X,
+    Y = Y
+  )
+}
+```
+
+# Instrumental inequalities
+
+```{r}
+run_instrumental_inequalities_singlejointiv <- function(data, y, x, instrument) {
+
+  dat <- data.frame(
+    Y  = factor(data[[y]]),
+    X  = factor(data[[x]]),
+    IV = factor(data[[instrument]])
+  )
+
+  cnt_xyz <- xtabs(~ IV + X + Y, data = dat)
+  cnt_z   <- xtabs(~ IV, data = dat)
+
+  p_xyz <- sweep(cnt_xyz, 1, cnt_z, "/")
+  p_xyz[!is.finite(p_xyz)] <- NA_real_
+
+  x_levels <- dimnames(p_xyz)$X
+  y_levels <- dimnames(p_xyz)$Y
+
+res <- lapply(seq_along(x_levels), function(ix) {
+
+    mat <- p_xyz[, ix, ]   # Z × Y
+
+    # Safely calculate max, returning 0 if all are NA to prevent -Inf
+    max_per_y <- apply(mat, 2, function(col) {
+      if (all(is.na(col))) 0 else max(col, na.rm = TRUE)
+    })
+
+    ineq_val <- sum(max_per_y, na.rm = TRUE)
+
+    data.frame(
+      X = x_levels[ix],
+      inequality_value = ineq_val,
+      violated = ineq_val > (1 + 1e-8) # Floating-point tolerance
+    )
+  })
+
+  res <- do.call(rbind, res)
+
+  list(
+    inequalities = res,
+    max_value = max(res$inequality_value, na.rm = TRUE),
+    violated = any(res$violated, na.rm = TRUE)
+  )
+}
+```
+
+# Generating Data
+
+```{r}
+settings <- rbind(
+  data.frame(
+    id = 1:9,
+    z_levels = 2:10,
+    x_levels = 2:10,
+    y_levels = 2:10
+  ),
+  data.frame(
+    id = 10,
+    z_levels = 10,
+    x_levels = 10,
+    y_levels = 2
+  )
+)
+
+shapes <- c(
+  "linear",
+  "nonlinear_monotone",
+  "non_monotone"
+)
+
+datasets <- list()
+
+for (s in shapes) {
+
+  for (i in seq_len(nrow(settings))) {
+
+    zlev <- settings$z_levels[i]
+    xlev <- settings$x_levels[i]
+    ylev <- settings$y_levels[i]
+
+    # -----------------------
+    # Valid IV dataset
+    # -----------------------
+
+    key_valid <- paste0(
+      s,
+      "_Z", zlev,
+      "_X", xlev,
+      "_Y", ylev,
+      "_valid"
+    )
+
+    datasets[[key_valid]] <- datagen_discrete_iv_singleZ(
+      n = 100000,
+      z_levels = zlev,
+      x_levels = xlev,
+      y_levels = ylev,
+      shape = s,
+      b_zy = 0
+    )
+
+    # -----------------------
+    # Invalid IV dataset
+    # -----------------------
+
+    key_invalid <- paste0(
+      s,
+      "_Z", zlev,
+      "_X", xlev,
+      "_Y", ylev,
+      "_invalid"
+    )
+
+    datasets[[key_invalid]] <- datagen_discrete_iv_singleZ(
+      n = 100000,
+      z_levels = zlev,
+      x_levels = xlev,
+      y_levels = ylev,
+      shape = s,
+      b_zy = 2
+    )
+  }
+}
+```
+
+# Checking Inequalities results
+
+```{r}
+results <- list()
+summary_list <- list()
+
+for (nm in names(datasets[19])) {
+
+  dat <- datasets[[nm]]
+
+  ineq <- run_instrumental_inequalities_singlejointiv(
+    data = dat,
+    y = "Y",
+    x = "X",
+    instrument = "Z"
+  )
+
+  results[[nm]] <- list(
+    ineq = ineq,
+    max_value = ineq$max_value,
+    violated = ineq$violated
+  )
+
+  summary_list[[length(summary_list)+1]] <- data.frame(
+    dataset = nm,
+    max_value = ineq$max_value,
+    violated = ineq$violated
+  )
+}
+
+summary_tbl <- do.call(rbind, summary_list)
+summary_tbl
+```
+
+```{r}
+library(dplyr)
+
+# 1. Define your common parameters here ----------------------------------------
+# Replace placeholders with your actual column names and settings
+TARGET_OUTCOME   <- "Y"
+TARGET_TREATMENT <- "X"
+TARGET_GROUP     <- "Z"
+
+# Optional parameters (set to NULL if you want the function to auto-detect)
+ASSUMPTIONS      <-  NULL # e.g., c("MTR") if supported by your setup
+K_VAL            <- NULL  
+M_VAL            <- NULL  
+
+# 2. Prepare the loop ---------------------------------------------------------
+# Ensure your list of datasets has names for easier tracking
+if (is.null(names(datasets))) {
+  names(datasets) <- paste0("dataset_", seq_along(datasets))
+}
+
+all_bounds_results <- list()
+
+# 3. Iterate over the datasets ------------------------------------------------
+for (ds_name in names(datasets[19])) {
+  
+  cat("\n##################################################\n")
+  cat("STARTING PROCESSING FOR:", ds_name, "\n")
+  cat("##################################################\n")
+  
+  # Safeguard the loop with tryCatch
+  res <- tryCatch({
+    
+    # Execute your custom function
+    df_bounds <- compute_ace_bounds(
+      data        = datasets[[ds_name]],
+      outcome     = TARGET_OUTCOME,
+      treatment   = TARGET_TREATMENT,
+      group       = TARGET_GROUP,
+      assumptions = ASSUMPTIONS,
+      k           = K_VAL,
+      m           = M_VAL,
+      verbose     = TRUE,
+      slack_val = 0.005,
+      tolerance = 0.0001
+    )
+    
+    # Append the dataset name so you know where the bounds came from
+    if (!is.null(df_bounds) && nrow(df_bounds) > 0) {
+      df_bounds <- df_bounds %>% dplyr::mutate(dataset_id = ds_name)
+    }
+    
+    df_bounds
+    
+  }, error = function(e) {
+    message("⚠️ Error encountered in dataset '", ds_name, "': ", e$message)
+    return(NULL)  # Return NULL on failure to keep the loop moving
+  })
+  
+  # Store the result if successful
+  all_bounds_results[[ds_name]] <- res
+}
+
+# 4. Consolidate results into a master Data Frame ----------------------------
+final_bounds_summary <- dplyr::bind_rows(all_bounds_results)
+
+cat("\n==================================================\n")
+cat("ALL DATASETS PROCESSED\n")
+cat("==================================================\n")
+print(final_bounds_summary)
+```
+
+# True ACE estimation
+
+```{r}
+fx_fun <- function(x, shape, x_levels) {
+
+  if(shape == "linear") {
+    0.6 * x
+
+  } else if(shape == "nonlinear_monotone") {
+    0.25 * x^2
+
+  } else {
+
+    if(x_levels == 2) {
+      ifelse(x == 1, 0, 1)
+    } else {
+      mid <- (x_levels + 1) / 2
+      -0.5 * (x - mid)^2
+    }
+  }
+}
+
+
+true_do_prob <- function(dat,
+                         x,
+                         y_level,
+                         shape,
+                         x_levels,
+                         y_levels,
+                         b_uy = 0.3,
+                         b_zy = 0,
+                         y_intercept = 0) {
+
+  y_cuts <- if(y_levels == 2) {
+    0
+  } else {
+    qnorm(seq(1/y_levels,
+              (y_levels-1)/y_levels,
+              length.out = y_levels-1))
+  }
+
+  z_centered <- dat$Z - mean(seq_len(max(dat$Z)))
+
+  mu <- y_intercept +
+    fx_fun(x, shape, x_levels) +
+    b_uy * dat$U +
+    b_zy * z_centered
+
+  scale_eps <- 0.5
+
+  if(y_level == 1) {
+
+    p <- plogis((y_cuts[1] - mu)/scale_eps)
+
+  } else if(y_level == y_levels) {
+
+    p <- 1 - plogis((y_cuts[y_levels-1] - mu)/scale_eps)
+
+  } else {
+
+    upper <- plogis((y_cuts[y_level] - mu)/scale_eps)
+    lower <- plogis((y_cuts[y_level-1] - mu)/scale_eps)
+
+    p <- upper - lower
+  }
+
+  mean(p)
+}
+
+
+
+true_mean_ace <- function(dat,
+                          shape,
+                          x_levels,
+                          y_levels,
+                          b_uy = 0.3,
+                          b_zy = 0,
+                          y_intercept = 0) {
+
+  x0 <- 1
+  x1 <- x_levels
+
+  y_vals <- seq_len(y_levels)
+
+  p_x1 <- sapply(y_vals, function(y) {
+    true_do_prob(
+      dat = dat,
+      x = x1,
+      y_level = y,
+      shape = shape,
+      x_levels = x_levels,
+      y_levels = y_levels,
+      b_uy = b_uy,
+      b_zy = b_zy,
+      y_intercept = y_intercept
+    )
+  })
+
+  p_x0 <- sapply(y_vals, function(y) {
+    true_do_prob(
+      dat = dat,
+      x = x0,
+      y_level = y,
+      shape = shape,
+      x_levels = x_levels,
+      y_levels = y_levels,
+      b_uy = b_uy,
+      b_zy = b_zy,
+      y_intercept = y_intercept
+    )
+  })
+
+  EY_x1 <- sum(y_vals * p_x1)
+  EY_x0 <- sum(y_vals * p_x0)
+
+  data.frame(
+    x1 = x1,
+    x0 = x0,
+    EY_do_x1 = EY_x1,
+    EY_do_x0 = EY_x0,
+    ace = EY_x1 - EY_x0
+  )
+}
+true_aces <- lapply(names(datasets), function(nm) {
+
+  shape <- sub("_Z.*", "", nm)
+
+  x_levels <- as.integer(
+    sub(".*_X([0-9]+)_Y.*", "\\1", nm)
+  )
+
+  y_levels <- as.integer(
+    sub(".*_Y([0-9]+)_.*", "\\1", nm)
+  )
+
+  out <- true_mean_ace(
+    dat = datasets[[nm]],
+    shape = shape,
+    x_levels = x_levels,
+    y_levels = y_levels
+  )
+
+  out$dataset <- nm
+
+  out
+})
+
+true_aces <- do.call(rbind, true_aces)
+
+row.names(true_aces) <- NULL
+```
