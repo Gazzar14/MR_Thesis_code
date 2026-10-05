@@ -1,6 +1,7 @@
 # Thesis Analysis Code and ACE-Bounding Algorithm
 
 This repository contains the R code used for the statistical analyses in the master’s thesis by **Khaled Aboul Azm**. It also includes a custom column-generation algorithm for bounding the **Average Causal Effect (ACE)** using instrumental-variable assumptions.
+All scripts are written in R 4.6.
 
 ## Repository contents
 
