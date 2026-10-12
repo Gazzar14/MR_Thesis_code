@@ -22,8 +22,14 @@ The analysis workflow consists of the following scripts:
 5. **`05_Instrument_strength.R`**  
    Evaluates the strength of the proposed genetic instruments, including calculation of the relevant F-statistics.
 
-6. **Main thesis analysis script**  
+6. **Main thesis analysis scripts**  
    Performs the primary statistical analyses and generates the corresponding tables and figures.
+   
+        6.1 01_descriptives_w_initial_analysis.R
+   
+        6.2 02_IV_inequalities.R
+   
+        6.3 03_causal_effect_bounds_2SLS.R
 
 The repository also contains the implementation of the custom ACE-bounding procedure described below.
 
@@ -42,7 +48,10 @@ The scripts should generally be run in numerical order:
         ↓
 05_Instrument_strength.R
         ↓
-Main thesis analysis script
+Main thesis analysis scripts
+   01_descriptives_w_initial_analysis.R
+   02_IV_inequalities.R
+   03_causal_effect_bounds_2SLS.R
 ```
 
 Scripts `01_Datamanagement.R` and `02_Datacheck.R` were executed on the **BISON server**. The main analysis script therefore loads their resulting datasets directly from the project data directory.
@@ -52,25 +61,16 @@ Scripts `03_SNP_MetaA.R`, `04_vitGeno_1000G.R`, and `05_Instrument_strength.R` s
 When running the analysis on the **GenEpi server**, the main analysis script is intended to be run from:
 
 ```bash
-~/ii2025MRVitD/analysis/Notebooks
+~/ii2025MRVitD/
 ```
+The code allows for running anywhere aslong as the main datasets and provided.
 
 ## Data availability
 
-The data used in the thesis are not included in this repository. Access may be restricted because of privacy, governance, licensing, or institutional requirements.
+The data used in the thesis are not included in this repository. No individual-level or otherwise restricted research data should be committed to this repository.
 
-The scripts may therefore not run without:
 
-- access to the relevant project data;
-- the expected directory structure;
-- the required R packages and external software;
-- access to the relevant institutional computing environment; and
-- any necessary reference data, including 1000 Genomes data.
-
-No individual-level or otherwise restricted research data should be committed to this repository.
-
-## Bounding the Average Causal Effect
-
+## Custom package for bounding the Average Causal Effect
 
 1. **Initialization**  
    Initialize the RMP with artificial variables assigned a large objective penalty. Solve the RMP to obtain the initial dual variables.
