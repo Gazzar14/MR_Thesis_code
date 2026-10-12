@@ -585,10 +585,10 @@ beta_stats <- vit %>%
   mutate(
     p_format = ifelse(p.value < 0.001, "< 0.001", sprintf("= %.3f", p.value)),
     plot_label = sprintf("\u03b2 = %.3f, p %s", estimate, p_format),
-    
+
     # Set x to Inf to push it to the absolute right edge of the plot
     x_pos = Inf,
-    
+
     # Adjust these Y values if needed so they sit cleanly in empty space
     y_pos = ifelse(survey == "B", 2.0, 1.7)
   )
@@ -597,7 +597,7 @@ beta_stats <- vit %>%
 p_scatter <- ggplot(vit, aes(x = vitd25_nmol, y = z_mets, color = survey)) +
   geom_point(size = 1.5, alpha = 0.4) +
   geom_smooth(method = "lm", se = TRUE, aes(fill = survey), alpha = 0.15, linewidth = 0.8) +
-  
+
   # Add the labels
   geom_text(
     data = beta_stats,
@@ -609,7 +609,7 @@ p_scatter <- ggplot(vit, aes(x = vitd25_nmol, y = z_mets, color = survey)) +
     fontface = "bold",
     show.legend = FALSE
   ) +
-  
+
   scale_color_manual(
     name = "Survey Timepoint",
     values = c("B" = "#1f77b4", "FU2" = "#d62728"),
@@ -673,10 +673,10 @@ pct_suff    <- stats$pct[stats$status == "Sufficiency (>50 nmol/L)"]
 vit_discret <- ggplot(vit_classified, aes(x = vitd25_nmol, fill = status)) +
   # Draw the histogram colored by clinical category
   geom_histogram(bins = 30, color = "white", alpha = 0.85) +
-  
+
   # Add vertical boundary lines at 25 and 50 nmol/L
   geom_vline(xintercept = c(25, 50), linetype = "dashed", color = "grey40", linewidth = 0.6) +
-  
+
   # Color palette: soft clinical red, orange, and green
   scale_fill_manual(
     name = "Clinical Status",
@@ -686,17 +686,17 @@ vit_discret <- ggplot(vit_classified, aes(x = vitd25_nmol, fill = status)) +
       "Sufficiency (>50 nmol/L)" = "#5cb85c"         # Muted Green
     )
   ) +
-  
+
   # Annotate percentages at the very top of each section (using y = Inf)
   annotate("text", x = 12.5, y = Inf, label = paste0(pct_severe, "%"),
            vjust = 2, size = 4.5, fontface = "bold", color = "#d9534f") +
-  
+
   annotate("text", x = 37.5, y = Inf, label = paste0(pct_insuff, "%"),
            vjust = 2, size = 4.5, fontface = "bold", color = "#e67e22") +
-  
+
   annotate("text", x = 75, y = Inf, label = paste0(pct_suff, "%"),
            vjust = 2, size = 4.5, fontface = "bold", color = "#4cae4c") +
-  
+
   labs(
     x = "25-hydroxyvitamin D (nmol/L)",
     y = "Count"
@@ -946,7 +946,7 @@ gt::gt(dfm3)
 # SNP selction
 ##############################
 
-snp_summary <- readRDS("../../data/snp_summary.rds")
+snp_summary <- readRDS(paste0(data_dir,"snp_summary.rds"))
 snp_summary
 
 
@@ -991,7 +991,7 @@ vit_baseline <- vit %>%
 
 # 2. Updated Analysis Function (Accepts both covariate and specific SNP)
 run_analysis_quad <- function(v, curr_snp) {
-  
+
   # Skip non-numeric outcomes
   if (!is.numeric(vit[[v]])) {
     return(
@@ -1005,27 +1005,27 @@ run_analysis_quad <- function(v, curr_snp) {
       )
     )
   }
-  
+
   adj_vars <- c("age", "survey", pcs)
-  
+
   # Remove outcome if present
   adj_vars <- setdiff(adj_vars, v)
-  
+
   # Direct model includes vitd25 unless outcome IS vitd25
   direct_vars <- adj_vars
   if (v != "vitd25") {
     direct_vars <- c("vitd25", direct_vars)
   }
-  
+
   # Formulas dynamically using the current SNP
   form_total <- as.formula(
     paste(v, "~", paste(c(curr_snp, adj_vars), collapse = " + "))
   )
-  
+
   form_direct <- as.formula(
     paste(v, "~", paste(c(curr_snp, direct_vars), collapse = " + "))
   )
-  
+
   get_p <- function(formula, data) {
     tryCatch({
       fit <- lm(formula, data = data)
@@ -1037,7 +1037,7 @@ run_analysis_quad <- function(v, curr_snp) {
       NA_real_
     })
   }
-  
+
   tibble(
     snp            = curr_snp,
     covariate      = v,
@@ -1127,30 +1127,30 @@ nominal_vars <- c("country")
 # =====================================================
 
 run_model <- function(outcome, curr_snp) {
-  
+
   # Build covariates using the current SNP
   covars <- c(curr_snp, "survey", "age", "sex", "country")
-  
+
   # Remove outcome from covariates if it's in the list
   covars <- setdiff(covars, outcome)
-  
+
   f <- as.formula(
     paste(outcome, "~", paste(covars, collapse = " + "))
   )
-  
+
   model_data <- model.frame(
     f,
     data = analysis_data,
     na.action = na.omit
   )
-  
+
   if (outcome %in% ordered_vars) {
-    
+
     fit <- MASS::polr(f, data = model_data, Hess = TRUE)
-    
+
     coefs <- coef(summary(fit))
     pvals <- 2 * pnorm(abs(coefs[, "t value"]), lower.tail = FALSE)
-    
+
     out <- tibble(
       outcome = outcome,
       comparison = NA_character_,
@@ -1161,15 +1161,15 @@ run_model <- function(outcome, curr_snp) {
       p.value = pvals,
       model = "ordinal_logistic"
     )
-    
+
   } else if (outcome %in% binary_vars) {
-    
+
     y <- droplevels(factor(model_data[[outcome]]))
     if (nlevels(y) < 2) return(tibble())
-    
+
     fit <- glm(f, data = model_data, family = binomial)
     levs <- levels(y)
-    
+
     out <- tidy(fit) %>%
       dplyr::mutate(
         outcome = .env$outcome,
@@ -1177,15 +1177,15 @@ run_model <- function(outcome, curr_snp) {
         model = "binary_logistic"
       ) %>%
       dplyr::select(outcome, comparison, term, estimate, std.error, statistic, p.value, model)
-    
+
   } else if (outcome %in% nominal_vars) {
-    
+
     y <- droplevels(factor(model_data[[outcome]]))
     if (nlevels(y) < 2) return(tibble())
-    
+
     fit <- nnet::multinom(f, data = model_data, trace = FALSE)
     s <- summary(fit)
-    
+
     # Handle binary outcomes gracefully in multinomial logic (returns vector instead of matrix)
     if (is.null(dim(s$coefficients))) {
       coefs <- matrix(s$coefficients, nrow = 1, dimnames = list(rownames(s$standard.errors), names(s$coefficients)))
@@ -1194,10 +1194,10 @@ run_model <- function(outcome, curr_snp) {
       coefs <- as.matrix(s$coefficients)
       ses   <- as.matrix(s$standard.errors)
     }
-    
+
     zvals <- coefs / ses
     pvals <- 2 * (1 - pnorm(abs(zvals)))
-    
+
     out <- tibble(
       outcome = outcome,
       comparison = rep(rownames(coefs), each = ncol(coefs)),
@@ -1208,11 +1208,11 @@ run_model <- function(outcome, curr_snp) {
       p.value = as.vector(t(pvals)),
       model = "multinomial_logistic"
     )
-    
+
   } else {
     out <- tibble()
   }
-  
+
   # FIX 2: Filter specifically for the current SNP term
   out %>%
     filter(term == curr_snp) %>%
@@ -1302,6 +1302,6 @@ final_table %>%
 
 
 #In theory, Ancestry should capture all the effects that the variable country can have on the SNP.
-# This might be both a blessing and a curse, as its far easier to falsify the SNP given a discrete country 
+# This might be both a blessing and a curse, as its far easier to falsify the SNP given a discrete country
 # variable than using the continuous ancestry PCs.
 

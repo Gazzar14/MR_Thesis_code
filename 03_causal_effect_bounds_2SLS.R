@@ -18,7 +18,7 @@
 #
 #   packages/CausalBoundsR/
 #
-# The package must be installed before this script is run. If running on the genepi server, use devtools to load the package 
+# The package must be installed before this script is run. If running on the genepi server, use devtools to load the package
 # devtools::load_all("../packages/CausalBoundsR")
 #
 # ==============================================================================
@@ -98,7 +98,7 @@ required_packages <- c(
   "scales"
 )
 
-devtools::load_all("../packages/CausalBoundsR")
+devtools::load_all("packages/CausalBoundsR")
 
 missing_packages <- required_packages[
   !vapply(
@@ -137,6 +137,9 @@ project_dir <- Sys.getenv(
   "IIVITD_PROJECT_DIR",
   unset = path.expand("~/ii2025MRVitD")
 )
+
+supp_dir <- file.path(project_dir, "analysis/Notebooks/Supplementary Files")
+supp_data_dir <- file.path(supp_dir, "datasets")
 
 analysis_dir <- file.path(project_dir, "analysis")
 data_dir <- file.path(project_dir, "data")
@@ -195,8 +198,7 @@ invisible(
 )
 
 required_input_files <- c(
-  vit_data_file,
-  gwas_results
+  vit_data_file
 )
 
 missing_input_files <- required_input_files[
@@ -232,7 +234,6 @@ message("Project directory: ", project_dir)
 message("Analysis directory: ", analysis_dir)
 message("Data directory: ", data_dir)
 message("Results directory: ", results_dir)
-message("GWAS results file: ", gwas_results)
 
 
 
@@ -272,6 +273,128 @@ instrument_vars <- c(
 # We later multiply by 9 to obtain the decile 1 -> 10 contrast.
 # ============================================================
 
+vit_disc <- vit %>%
+  mutate(
+    ## -------------------------
+    ## Vitamin D discretisations
+    ## -------------------------
+
+    ## ESPGHAN
+    vitd_espghan = case_when(
+      vitd25_nmol < 25 ~ 0L,
+      vitd25_nmol < 50 ~ 1L,
+      vitd25_nmol >= 50 ~ 2L,
+      TRUE ~ NA_integer_
+    ),
+
+    ## IOM
+    vitd_iom = case_when(
+      vitd25_nmol < 30 ~ 0L,
+      vitd25_nmol < 50 ~ 1L,
+      vitd25_nmol >= 50 ~ 2L,
+      TRUE ~ NA_integer_
+    ),
+
+    ## IDEFICS
+    vitd_idefics = case_when(
+      vitd25_nmol < 50 ~ 0L,
+      vitd25_nmol < 75 ~ 1L,
+      vitd25_nmol >= 75 ~ 2L,
+      TRUE ~ NA_integer_
+    ),
+
+    ## Binary
+    vitd_binary50 = if_else(vitd25_nmol < 50, 0L, 1L, missing = NA_integer_),
+
+    ## Empirical partitions
+    vitd_quintile = ntile(vitd25_nmol, 5) - 1L,
+    vitd_decile   = ntile(vitd25_nmol, 10) - 1L,
+
+    ## -------------------------
+    ## z_mets discretisations
+    ## -------------------------
+
+    ## Equal-width ("Borel") partitions
+    zmets_borel3 = cut(
+      z_mets,
+      breaks = seq(min(z_mets, na.rm = TRUE),
+                   max(z_mets, na.rm = TRUE),
+                   length.out = 4),
+      include.lowest = TRUE,
+      labels = FALSE
+    ) - 1L,
+
+    zmets_borel5 = cut(
+      z_mets,
+      breaks = seq(min(z_mets, na.rm = TRUE),
+                   max(z_mets, na.rm = TRUE),
+                   length.out = 6),
+      include.lowest = TRUE,
+      labels = FALSE
+    ) - 1L,
+
+    zmets_borel10 = cut(
+      z_mets,
+      breaks = seq(min(z_mets, na.rm = TRUE),
+                   max(z_mets, na.rm = TRUE),
+                   length.out = 11),
+      include.lowest = TRUE,
+      labels = FALSE
+    ) - 1L,
+
+    ## Equal-probability ("CDF") partitions
+    zmets_cdf3 = ntile(z_mets, 3) - 1L,
+    zmets_cdf5 = ntile(z_mets, 5) - 1L,
+    zmets_cdf10 = ntile(z_mets, 10) - 1L,
+
+    ## Binary partitions (Added)
+    zmets_binary0 = if_else(z_mets >= 0, 1L, 0L, missing = NA_integer_),
+    zmets_binary_median = if_else(z_mets >= median(z_mets, na.rm = TRUE), 1L, 0L, missing = NA_integer_)
+  )
+
+
+
+# Instrument
+
+# Identify the SNP columns
+snp_vars <- grep("^rs", names(vit_disc), value = TRUE)
+
+vit_disc <- vit_disc %>%
+  mutate(
+    snp_combination = apply(
+      select(., all_of(snp_vars)),
+      1,
+      function(x) {
+        if (any(is.na(x))) NA_character_
+        else paste0(x, collapse = "")
+      }
+    ),
+
+    snp_additive = rowSums(
+      select(., all_of(snp_vars)),
+      na.rm = FALSE
+    )
+  )
+
+snp_vars_thesis <- c("rs11732044_t","rs116970203_a")
+
+vit_disc_thesis <- vit_disc %>%
+  mutate(
+    snp_combination = apply(
+      select(., all_of(snp_vars_thesis)),
+      1,
+      function(x) {
+        if (any(is.na(x))) NA_character_
+        else paste0(x, collapse = "")
+      }
+    ),
+
+    snp_additive = rowSums(
+      select(., all_of(snp_vars_thesis)),
+      na.rm = FALSE
+    )
+  )
+
 vit_disc_thesis$vitd_decile_num <- as.numeric(
   as.character(vit_disc_thesis$vitd_decile)
 )
@@ -301,28 +424,28 @@ iv_adj_models <- list()
 
 
 for (inst in instrument_vars) {
-  
+
   # ----------------------------------------------------------
   # Unadjusted model
   # ----------------------------------------------------------
-  
+
   unadj_formula <- as.formula(
     paste(
       "zmets_binary_median ~ vitd_decile_num |",
       inst
     )
   )
-  
+
   iv_unadj_models[[inst]] <- ivreg(
     unadj_formula,
     data = vit_disc_thesis
   )
-  
-  
+
+
   # ----------------------------------------------------------
   # Adjusted model
   # ----------------------------------------------------------
-  
+
   adj_formula <- as.formula(
     paste(
       "zmets_binary_median ~ vitd_decile_num +",
@@ -333,7 +456,7 @@ for (inst in instrument_vars) {
       covariates
     )
   )
-  
+
   iv_adj_models[[inst]] <- ivreg(
     adj_formula,
     data = vit_disc_thesis
@@ -362,71 +485,71 @@ for (inst in instrument_vars) {
 # ============================================================
 
 extract_iv_coefs <- function(object_list, model_type) {
-  
+
   purrr::map_dfr(names(object_list), function(inst) {
-    
+
     model <- object_list[[inst]]
-    
+
     # Get coefficient matrix
     coef_mat <- summary(model)$coefficients
-    
+
     # Check that the exposure is present
     if (!"vitd_decile_num" %in% rownames(coef_mat)) {
       return(NULL)
     }
-    
+
     # --------------------------------------------------------
     # Per-decile IV estimate
     # --------------------------------------------------------
-    
+
     est_per_decile <- coef_mat[
       "vitd_decile_num",
       "Estimate"
     ]
-    
+
     se_per_decile <- coef_mat[
       "vitd_decile_num",
       "Std. Error"
     ]
-    
-    
+
+
     # --------------------------------------------------------
     # Convert to decile 1 -> decile 10 contrast
     # --------------------------------------------------------
-    
+
     n_decile_steps <- 10 - 1
-    
+
     est_1_to_10 <- est_per_decile * n_decile_steps
-    
+
     se_1_to_10 <- se_per_decile * n_decile_steps
-    
-    
+
+
     # --------------------------------------------------------
     # 95% CI
     # --------------------------------------------------------
-    
+
     lower_1_to_10 <- est_1_to_10 - 1.96 * se_1_to_10
-    
+
     upper_1_to_10 <- est_1_to_10 + 1.96 * se_1_to_10
-    
-    
+
+
     # --------------------------------------------------------
     # Return results
     # --------------------------------------------------------
-    
+
     tibble(
       instrument = inst,
       model = model_type,
-      
+
       # Original IV estimate
       estimate_per_decile = est_per_decile,
       std_error_per_decile = se_per_decile,
-      
+
       # Main estimand:
       # vitamin D decile 1 -> decile 10
       estimate_1_to_10 = est_1_to_10,
       std_error_1_to_10 = se_1_to_10,
-      
+
       lower_1_to_10 = lower_1_to_10,
       upper_1_to_10 = upper_1_to_10
     )
@@ -439,12 +562,12 @@ extract_iv_coefs <- function(object_list, model_type) {
 # ============================================================
 
 coef_df <- dplyr::bind_rows(
-  
+
   extract_iv_coefs(
     iv_unadj_models,
     "Unadjusted"
   ),
-  
+
   extract_iv_coefs(
     iv_adj_models,
     "Adjusted"
@@ -465,14 +588,14 @@ print(coef_df)
 
 iv_results <- coef_df %>%
   mutate(
-    
+
     # Express probability difference as percentage points
     estimate_percentage_points = estimate_1_to_10 * 100,
-    
+
     lower_percentage_points = lower_1_to_10 * 100,
-    
+
     upper_percentage_points = upper_1_to_10 * 100,
-    
+
     # Formatted estimate + CI
     estimate_ci = sprintf(
       "%.3f (%.3f, %.3f)",
@@ -480,7 +603,7 @@ iv_results <- coef_df %>%
       lower_1_to_10,
       upper_1_to_10
     ),
-    
+
     # Formatted percentage-point version
     estimate_ci_percentage_points = sprintf(
       "%.1f (%.1f, %.1f)",
@@ -603,10 +726,10 @@ ggplot(
 # 1. Function to extract F-statistics from raw ivreg models
 extract_f_stats <- function(model_list, model_type) {
   purrr::map_dfr(names(model_list), function(inst) {
-    
+
     # Explicitly call summary() with diagnostics = TRUE on the raw model
     diag_mat <- summary(model_list[[inst]], diagnostics = TRUE)$diagnostics
-    
+
     # Check if diagnostics exist and extract the Weak instruments statistic
     if (!is.null(diag_mat) && "Weak instruments" %in% rownames(diag_mat)) {
       tibble::tibble(
@@ -663,7 +786,7 @@ ggplot(vit_disc_thesis, aes(x = factor(snp_additive), y = z_mets)) +
 
 iv_table <- coef_df %>%
   mutate(
-    
+
     Instrument = case_when(
       instrument == "rs11732044_t"    ~ "rs11732044",
       instrument == "rs116970203_a"   ~ "rs116970203",
@@ -671,12 +794,12 @@ iv_table <- coef_df %>%
       instrument == "snp_additive"    ~ "SNP additive score",
       TRUE ~ instrument
     ),
-    
+
     Estimate = sprintf(
       "%.3f",
       estimate_1_to_10
     ),
-    
+
     `95% CI` = sprintf(
       "%.3f, %.3f",
       lower_1_to_10,
@@ -776,30 +899,30 @@ instruments <- c(
 # 3. Loop over each instrument
 for (inst in instruments) {
   message("\n--- Processing Instrument: ", inst, " ---")
-  
+
   # Compute the causal bounds
   results <- compute_ace_bounds(
-    data = vit_disc_thesis, 
-    outcome = outcome_var, 
-    treatment = treatment_var, 
+    data = vit_disc_thesis,
+    outcome = outcome_var,
+    treatment = treatment_var,
     instrument = inst,
     slack_val = 0,
     tolerance = 0.0000000000000000000000000000000000000000000000001,
     verbose = FALSE)
-  
+
   print(results)
   # Clean up instrument name for filenames (e.g., rs11732044_t -> rs11732044)
   clean_inst <- gsub("_t$|_a$", "", inst)
-  
+
   # Define consistent filenames
   file_base <- paste0("ace_bounds2_", clean_inst)
-  rds_path  <- file.path(data_dir, paste0(file_base, ".rds"))
-  tex_path  <- file.path(base_dir, paste0(file_base, ".tex"))
-  
+  rds_path  <- file.path(supp_data_dir, paste0(file_base, ".rds"))
+  tex_path  <- file.path(supp_dir, paste0(file_base, ".tex"))
+
   # Save the raw R object (RDS) for future analysis inside the datasets subfolder
   saveRDS(results, file = rds_path)
   message("Saved RDS dataset to: ", rds_path)
-  
+
   # Convert results to a clean data frame for LaTeX export
   tbl_data <- if (is.data.frame(results)) {
     results
@@ -809,7 +932,7 @@ for (inst in instruments) {
   } else {
     as.data.frame(results)
   }
-  
+
   # Generate a publication-ready LaTeX table using gt
   latex_table <- tbl_data %>%
     gt() %>%
@@ -826,7 +949,7 @@ for (inst in instruments) {
       table.width = pct(100),
       column_labels.font.weight = "bold"
     )
-  
+
   # Export to LaTeX (automatically wraps in a longtable environment if the table is long)
   #gtsave(latex_table, filename = tex_path)
   message("Saved LaTeX table to: ", tex_path)
@@ -847,46 +970,46 @@ country_weights <- vit_disc_thesis %>%
 # 3. Loop over each instrument
 for (inst in instruments) {
   message("\n--- Processing Instrument: ", inst, " ---")
-  
+
   # --- NEW: Stratify by country and compute bounds ---
   strata_results_list <- lapply(1:nrow(country_weights), function(i) {
     c_name <- country_weights$country[i]
     c_weight <- country_weights$weight[i]
-    
+
     # Subset data for the specific country
     subset_data <- vit_disc_thesis %>% filter(country == c_name)
-    
+
     # Compute bounds for this country
     res <- compute_ace_bounds(
-      data = subset_data, 
-      outcome = outcome_var, 
-      treatment = treatment_var, 
+      data = subset_data,
+      outcome = outcome_var,
+      treatment = treatment_var,
       instrument = inst,
       slack_val = 0,
       tolerance = 0.0000000000000000000000000000000000000000000000001,
       verbose = FALSE
     )
-    
+
     print(res)
-    
+
     # Standardize to data frame
     res_df <- if (is.data.frame(res)) { res } else if (is.list(res) && "bounds" %in% names(res)) { res$bounds } else { as.data.frame(res) }
-    
+
     # Tag with country and weight
     res_df$country <- c_name
     res_df$weight <- c_weight
-    
+
     return(res_df)
   })
-  
+
   # Combine all country-specific bounds into one dataframe
   all_strata_df <- bind_rows(strata_results_list)
-  
+
   # --- NEW: Calculate the weighted average to get the adjusted bounds ---
   # Identify numeric columns (bounds/estimates) and grouping columns (e.g., treatment levels, if your output has multiple rows)
   numeric_cols <- names(all_strata_df)[sapply(all_strata_df, is.numeric) & !names(all_strata_df) %in% c("weight")]
   group_cols <- names(all_strata_df)[!sapply(all_strata_df, is.numeric) & !names(all_strata_df) %in% c("country")]
-  
+
   if (length(group_cols) > 0) {
     tbl_data <- all_strata_df %>%
       group_by(across(all_of(group_cols))) %>%
@@ -895,19 +1018,19 @@ for (inst in instruments) {
     tbl_data <- all_strata_df %>%
       summarize(across(all_of(numeric_cols), ~ sum(.x * weight)))
   }
-  
+
   # Clean up instrument name for filenames (e.g., rs11732044_t -> rs11732044)
   clean_inst <- gsub("_t$|_a$", "", inst)
-  
+
   # Define consistent filenames
   file_base <- paste0("ace_bounds_adjusted_", clean_inst)
-  rds_path  <- file.path(data_dir, paste0(file_base, ".rds"))
-  tex_path  <- file.path(base_dir, paste0(file_base, ".tex"))
-  
+  rds_path  <- file.path(supp_data_dir, paste0(file_base, ".rds"))
+  tex_path  <- file.path(supp_dir, paste0(file_base, ".tex"))
+
   # Save the raw adjusted R object (RDS)
   saveRDS(tbl_data, file = rds_path)
   message("Saved adjusted RDS dataset to: ", rds_path)
-  
+
   # Generate a publication-ready LaTeX table using gt
   latex_table <- tbl_data %>%
     gt() %>%
@@ -923,7 +1046,7 @@ for (inst in instruments) {
       table.width = pct(100),
       column_labels.font.weight = "bold"
     )
-  
+
   # Export to LaTeX
   #gtsave(latex_table, filename = tex_path)
   message("Saved LaTeX table to: ", tex_path)
@@ -932,7 +1055,7 @@ for (inst in instruments) {
 message("\nPipeline complete! All country-adjusted datasets and tables saved successfully.")
 
 
-# Visualisation 
+# Visualisation
 
 
 instruments <- c(
@@ -955,19 +1078,19 @@ iv_plot <- coef_df %>%
 
 # ACE bounds
 ace_plot <- purrr::map_dfr(instruments, function(inst) {
-  
+
   clean_inst <- gsub("_t$|_a$", "", inst)
-  
+
   ace_result <- readRDS(
     file.path(data_dir, paste0("ace_bounds_", clean_inst, ".rds"))
   )
-  
+
   if (is.list(ace_result) && "bounds" %in% names(ace_result)) {
     ace_result <- ace_result$bounds
   }
-  
+
   ace_result <- as.data.frame(ace_result)
-  
+
   ace_result %>%
     dplyr::transmute(
       instrument = inst,
@@ -992,27 +1115,27 @@ plot_df <- dplyr::bind_rows(ace_plot, iv_plot) %>%
       "snp_additive"     = "Additive SNP score",
       .default = instrument
     ),
-    
+
     row_label = paste(instrument_label, method, sep = " — "),
-    
+
     # Text to display beside each interval
     annotation = dplyr::if_else(
       method == "ACE bounds",
       sprintf("[%.2f, %.2f]", lower, upper),
       sprintf("%.2f [%.2f, %.2f]", estimate, lower, upper)
     ),
-    
+
     row_label = factor(row_label, levels = rev(unique(row_label)))
   )
 
 p <- ggplot(plot_df, aes(y = row_label)) +
-  
+
   geom_vline(
     xintercept = 0,
     linetype = "dashed",
     colour = "grey40"
   ) +
-  
+
   geom_segment(
     aes(
       x = lower,
@@ -1022,7 +1145,7 @@ p <- ggplot(plot_df, aes(y = row_label)) +
     ),
     linewidth = 1
   ) +
-  
+
   geom_point(
     data = dplyr::filter(
       plot_df,
@@ -1031,7 +1154,7 @@ p <- ggplot(plot_df, aes(y = row_label)) +
     aes(x = estimate, colour = method),
     size = 2.8
   ) +
-  
+
   # Small numerical labels to the right of the intervals
   geom_text(
     aes(
@@ -1043,22 +1166,22 @@ p <- ggplot(plot_df, aes(y = row_label)) +
     size = 2.2,
     show.legend = FALSE
   ) +
-  
+
   scale_colour_manual(
     values = c(
       "ACE bounds" = "#1b9e77",
       "2SLS estimate (95% CI)" = "#d95f02"
     )
   ) +
-  
+
   # Adds room to the right for the annotation labels
   scale_x_continuous(
     expand = expansion(mult = c(0.03, 0.32))
   ) +
-  
+
   # Allows text outside the plotting panel
   coord_cartesian(clip = "off") +
-  
+
   labs(
     x = "Causal risk difference: highest versus lowest vitamin D decile",
     y = NULL,
@@ -1068,7 +1191,7 @@ p <- ggplot(plot_df, aes(y = row_label)) +
       "Green lines: ACE bounds; orange point/line: unadjusted 2SLS estimate and 95% confidence interval"
     )
   ) +
-  
+
   theme_minimal(base_size = 12) +
   theme(
     legend.position = "top",
@@ -1104,7 +1227,7 @@ comparison_df <- ace_plot %>%
       "snp_additive"     = "Combined (Additive)",
       .default = instrument
     ),
-    
+
     # Arrange labels in desired top-to-bottom order
     instrument_label = factor(
       instrument_label,
@@ -1115,7 +1238,7 @@ comparison_df <- ace_plot %>%
         "Combined (Joint)"
       ))
     ),
-    
+
     label_lower = sprintf("%.3f", ace_lower),
     label_upper = sprintf("%.3f", ace_upper),
     label_2sls  = sprintf("%.3f", estimate_2sls)
@@ -1124,7 +1247,7 @@ p_comparison <- ggplot(
   comparison_df,
   aes(y = instrument_label)
 ) +
-  
+
   # Null line
   geom_vline(
     xintercept = 0,
@@ -1132,7 +1255,7 @@ p_comparison <- ggplot(
     colour = "grey65",
     linewidth = 0.5
   ) +
-  
+
   # ACE bound interval
   geom_segment(
     aes(
@@ -1143,27 +1266,27 @@ p_comparison <- ggplot(
     colour = "#2F3548",
     linewidth = 0.8
   ) +
-  
+
   # Endpoint markers for ACE bounds
   geom_point(
     aes(x = ace_lower),
     colour = "#2F3548",
     size = 2.6
   ) +
-  
+
   geom_point(
     aes(x = ace_upper),
     colour = "#2F3548",
     size = 2.6
   ) +
-  
+
   # Unadjusted 2SLS estimate
   geom_point(
     aes(x = estimate_2sls),
     colour = "#E41A1C",
     size = 3.5
   ) +
-  
+
   # Lower ACE-bound label
   geom_text(
     aes(
@@ -1175,7 +1298,7 @@ p_comparison <- ggplot(
     size = 2.5,
     colour = "#555555"
   ) +
-  
+
   # Upper ACE-bound label
   geom_text(
     aes(
@@ -1187,7 +1310,7 @@ p_comparison <- ggplot(
     size = 2.5,
     colour = "#555555"
   ) +
-  
+
   # 2SLS estimate label
   geom_text(
     aes(
@@ -1200,18 +1323,18 @@ p_comparison <- ggplot(
     fontface = "bold",
     colour = "#E41A1C"
   ) +
-  
+
   scale_x_continuous(
     breaks = seq(-1, 1, by = 0.25),
     limits = c(-1, 1)
   ) +
-  
+
   labs(
     title = "Non-parametric ACE bounds and the unadjusted 2SLS estimates",
     x = "ACE / Risk difference: vitamin D decile 9 versus decile 0",
     y = NULL
   ) +
-  
+
   theme_minimal(base_size = 12) +
   theme(
     panel.grid.major.y = element_blank(),
@@ -1226,7 +1349,7 @@ print(p_comparison)
 
 
 ggsave(
-  file.path(base_dir, "2sls_points_with_ace_bounds2.pdf"),
+  file.path(supp_dir, "2sls_points_with_ace_bounds2.pdf"),
   p_comparison,
   width = fig_width,
   height = fig_height

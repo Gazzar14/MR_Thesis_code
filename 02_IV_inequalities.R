@@ -178,8 +178,7 @@ invisible(
 )
 
 required_input_files <- c(
-  vit_data_file,
-  gwas_results
+  vit_data_file
 )
 
 missing_input_files <- required_input_files[
@@ -215,7 +214,6 @@ message("Project directory: ", project_dir)
 message("Analysis directory: ", analysis_dir)
 message("Data directory: ", data_dir)
 message("Results directory: ", results_dir)
-message("GWAS results file: ", gwas_results)
 
 
 
@@ -234,7 +232,7 @@ vit_disc <- vit %>%
     ## -------------------------
     ## Vitamin D discretisations
     ## -------------------------
-    
+
     ## ESPGHAN
     vitd_espghan = case_when(
       vitd25_nmol < 25 ~ 0L,
@@ -242,7 +240,7 @@ vit_disc <- vit %>%
       vitd25_nmol >= 50 ~ 2L,
       TRUE ~ NA_integer_
     ),
-    
+
     ## IOM
     vitd_iom = case_when(
       vitd25_nmol < 30 ~ 0L,
@@ -250,7 +248,7 @@ vit_disc <- vit %>%
       vitd25_nmol >= 50 ~ 2L,
       TRUE ~ NA_integer_
     ),
-    
+
     ## IDEFICS
     vitd_idefics = case_when(
       vitd25_nmol < 50 ~ 0L,
@@ -258,18 +256,18 @@ vit_disc <- vit %>%
       vitd25_nmol >= 75 ~ 2L,
       TRUE ~ NA_integer_
     ),
-    
+
     ## Binary
     vitd_binary50 = if_else(vitd25_nmol < 50, 0L, 1L, missing = NA_integer_),
-    
+
     ## Empirical partitions
     vitd_quintile = ntile(vitd25_nmol, 5) - 1L,
     vitd_decile   = ntile(vitd25_nmol, 10) - 1L,
-    
+
     ## -------------------------
     ## z_mets discretisations
     ## -------------------------
-    
+
     ## Equal-width ("Borel") partitions
     zmets_borel3 = cut(
       z_mets,
@@ -279,7 +277,7 @@ vit_disc <- vit %>%
       include.lowest = TRUE,
       labels = FALSE
     ) - 1L,
-    
+
     zmets_borel5 = cut(
       z_mets,
       breaks = seq(min(z_mets, na.rm = TRUE),
@@ -288,7 +286,7 @@ vit_disc <- vit %>%
       include.lowest = TRUE,
       labels = FALSE
     ) - 1L,
-    
+
     zmets_borel10 = cut(
       z_mets,
       breaks = seq(min(z_mets, na.rm = TRUE),
@@ -297,12 +295,12 @@ vit_disc <- vit %>%
       include.lowest = TRUE,
       labels = FALSE
     ) - 1L,
-    
+
     ## Equal-probability ("CDF") partitions
     zmets_cdf3 = ntile(z_mets, 3) - 1L,
     zmets_cdf5 = ntile(z_mets, 5) - 1L,
     zmets_cdf10 = ntile(z_mets, 10) - 1L,
-    
+
     ## Binary partitions (Added)
     zmets_binary0 = if_else(z_mets >= 0, 1L, 0L, missing = NA_integer_),
     zmets_binary_median = if_else(z_mets >= median(z_mets, na.rm = TRUE), 1L, 0L, missing = NA_integer_)
@@ -320,7 +318,7 @@ vit_disc_thesis <- vit_disc %>%
         else paste0(x, collapse = "")
       }
     ),
-    
+
     snp_additive = rowSums(
       select(., all_of(snp_vars_thesis)),
       na.rm = FALSE
@@ -329,7 +327,7 @@ vit_disc_thesis <- vit_disc %>%
 
 
 #Coded as:
-  
+
 #  | Variable | 0                 | 1             | 2           |
 #  |----------|-------------------|---------------|-------------|
 #  | ESPGHAN  | Severe deficiency | Insufficiency | Sufficiency |
@@ -351,35 +349,35 @@ plot_discretization_heatmap <- function(
     reference_exposure = NULL,
     relative = FALSE
 ) {
-  
+
   joint_instrument <- if (joint_type == "combination") {
     "snp_combination"
   } else {
     "snp_additive"
   }
-  
+
   # ---------------------------------------------------------
   # 1. Select relevant instruments
   # ---------------------------------------------------------
-  
+
   instrument_order <- c(
     "rs11732044_t",
     "rs116970203_a",
     joint_instrument
   )
-  
+
   instrument_labels <- c(
     "rs11732044_t" = "SNP 1",
     "rs116970203_a" = "SNP 2",
     "snp_combination" = "Joint",
     "snp_additive" = "Joint"
   )
-  
+
   # ---------------------------------------------------------
   # 2. Extract data
   # ---------------------------------------------------------
-  
-  plot_data <- summary_tbl %>%
+
+  plot_data <- summary_tbl2 %>%
     filter(
       outcome == outcome_var,
       exposure %in% exposure_seq,
@@ -409,24 +407,24 @@ plot_discretization_heatmap <- function(
       max_value
     ) %>%
     distinct()
-  
+
   # ---------------------------------------------------------
   # 3. Calculate values
   # ---------------------------------------------------------
-  
+
   if (relative) {
-    
+
     if (is.null(reference_exposure)) {
       reference_exposure <- exposure_seq[1]
     }
-    
+
     reference_values <- plot_data %>%
       filter(exposure == reference_exposure) %>%
       select(
         instrument,
         reference_value = max_value
       )
-    
+
     plot_data <- plot_data %>%
       left_join(
         reference_values,
@@ -435,17 +433,17 @@ plot_discretization_heatmap <- function(
       mutate(
         value = max_value - reference_value
       )
-    
+
   } else {
-    
+
     plot_data <- plot_data %>%
       mutate(value = max_value)
   }
-  
+
   # ---------------------------------------------------------
   # 4. Exposure labels
   # ---------------------------------------------------------
-  
+
   exposure_labels <- plot_data %>%
     distinct(exposure, x_levels) %>%
     mutate(
@@ -456,22 +454,22 @@ plot_discretization_heatmap <- function(
         " categories)"
       )
     )
-  
+
   x_labels <- exposure_labels$label
   names(x_labels) <- exposure_labels$exposure
-  
+
   # ---------------------------------------------------------
   # 5. Absolute heatmap
   # ---------------------------------------------------------
-  
+
   if (!relative) {
-    
+
     # Maximum value in the actual data
     data_max <- max(plot_data$value, na.rm = TRUE)
-    
+
     # Keep the upper limit at least 1, but allow values > 1
     scale_max <- max(1, data_max)
-    
+
     p <- ggplot(
       plot_data,
       aes(
@@ -480,12 +478,12 @@ plot_discretization_heatmap <- function(
         fill = value
       )
     ) +
-      
+
       geom_tile(
         colour = "white",
         linewidth = 0.8
       ) +
-      
+
       # Values >= 1 are red; values < 1 are white
       geom_text(
         aes(
@@ -495,7 +493,7 @@ plot_discretization_heatmap <- function(
         size = 3.5,
         fontface = "bold"
       ) +
-      
+
       scale_colour_manual(
         values = c(
           "FALSE" = "white",
@@ -503,7 +501,7 @@ plot_discretization_heatmap <- function(
         ),
         guide = "none"
       ) +
-      
+
       # Light = low inequality
       # Dark = high inequality
       scale_fill_gradient(
@@ -513,7 +511,7 @@ plot_discretization_heatmap <- function(
         breaks = pretty(c(0, scale_max)),
         name = "Maximum\ninequality"
       ) +
-      
+
       labs(
         x = NULL,
         y = NULL,
@@ -524,15 +522,15 @@ plot_discretization_heatmap <- function(
           " instrument"
         )
       )
-    
+
   } else {
-    
+
     # -------------------------------------------------------
     # Relative / sensitivity heatmap
     # -------------------------------------------------------
-    
+
     max_abs <- max(abs(plot_data$value), na.rm = TRUE)
-    
+
     p <- ggplot(
       plot_data,
       aes(
@@ -541,12 +539,12 @@ plot_discretization_heatmap <- function(
         fill = value
       )
     ) +
-      
+
       geom_tile(
         colour = "white",
         linewidth = 0.8
       ) +
-      
+
       geom_text(
         aes(
           label = sprintf("%.2f", value),
@@ -555,7 +553,7 @@ plot_discretization_heatmap <- function(
         size = 3.5,
         fontface = "bold"
       ) +
-      
+
       scale_colour_manual(
         values = c(
           "FALSE" = "white",
@@ -563,7 +561,7 @@ plot_discretization_heatmap <- function(
         ),
         guide = "none"
       ) +
-      
+
       scale_fill_gradient2(
         low = "grey80",
         mid = "white",
@@ -572,7 +570,7 @@ plot_discretization_heatmap <- function(
         limits = c(-max_abs, max_abs),
         name = "Change in\nmax inequality"
       ) +
-      
+
       labs(
         x = NULL,
         y = NULL,
@@ -585,38 +583,38 @@ plot_discretization_heatmap <- function(
         subtitle = "Change relative to reference discretisation"
       )
   }
-  
+
   # ---------------------------------------------------------
   # 6. Final formatting
   # ---------------------------------------------------------
-  
+
   p +
     scale_x_discrete(
       labels = x_labels
     ) +
-    
+
     theme_minimal(base_size = 11) +
-    
+
     theme(
       panel.grid = element_blank(),
-      
+
       axis.text.x = element_text(
         angle = 0,
         hjust = 0.5
       ),
-      
+
       axis.text.y = element_text(
         face = "bold"
       ),
-      
+
       plot.title = element_text(
         face = "bold"
       ),
-      
+
       plot.subtitle = element_text(
         size = 9
       ),
-      
+
       legend.position = "right"
     )
 }
@@ -630,21 +628,7 @@ vitd_labels <- c(
   vitd_decile   = "Deciles"
 )
 
-plot_discretization_heatmap(
-  summary_tbl = summary_tbl2,
-  outcome_var = "zmets_binary_median",
-  exposure_seq = vitd_vars,
-  joint_type = "combination",
-  relative = FALSE
-)
 
-plot_discretization_heatmap(
-  summary_tbl = summary_tbl2,
-  outcome_var = "zmets_borel10",
-  exposure_seq = vitd_vars,
-  joint_type = "additive",
-  relative = FALSE
-)
 
 
 plot_outcome_discretization_heatmap <- function(
@@ -653,34 +637,34 @@ plot_outcome_discretization_heatmap <- function(
     outcome_seq,
     joint_type = "combination"
 ) {
-  
+
   joint_instrument <- if (joint_type == "combination") {
     "snp_combination"
   } else {
     "snp_additive"
   }
-  
+
   # ---------------------------------------------------------
   # 1. Select relevant instruments
   # ---------------------------------------------------------
-  
+
   instrument_order <- c(
     "rs11732044_t",
     "rs116970203_a",
     joint_instrument
   )
-  
+
   instrument_labels <- c(
     "rs11732044_t" = "SNP 1",
     "rs116970203_a" = "SNP 2",
     "snp_combination" = "Joint",
     "snp_additive" = "Joint"
   )
-  
+
   # ---------------------------------------------------------
   # 2. Extract data
   # ---------------------------------------------------------
-  
+
   plot_data <- summary_tbl %>%
     filter(
       exposure == exposure_var,
@@ -714,11 +698,11 @@ plot_outcome_discretization_heatmap <- function(
       max_value
     ) %>%
     distinct()
-  
+
   # ---------------------------------------------------------
   # 3. Outcome labels
   # ---------------------------------------------------------
-  
+
   outcome_labels <- plot_data %>%
     distinct(outcome, y_levels) %>%
     mutate(
@@ -729,28 +713,28 @@ plot_outcome_discretization_heatmap <- function(
         " categories)"
       )
     )
-  
+
   x_labels <- outcome_labels$label
   names(x_labels) <- outcome_labels$outcome
-  
+
   # ---------------------------------------------------------
   # 4. Determine colour scale
   # ---------------------------------------------------------
-  
+
   data_max <- max(
     plot_data$max_value,
     na.rm = TRUE
   )
-  
+
   scale_max <- max(
     1,
     data_max
   )
-  
+
   # ---------------------------------------------------------
   # 5. Heatmap
   # ---------------------------------------------------------
-  
+
   p <- ggplot(
     plot_data,
     aes(
@@ -759,12 +743,12 @@ plot_outcome_discretization_heatmap <- function(
       fill = max_value
     )
   ) +
-    
+
     geom_tile(
       colour = "white",
       linewidth = 0.8
     ) +
-    
+
     # White text normally; red when inequality >= 1
     geom_text(
       aes(
@@ -774,7 +758,7 @@ plot_outcome_discretization_heatmap <- function(
       size = 3.5,
       fontface = "bold"
     ) +
-    
+
     scale_colour_manual(
       values = c(
         "FALSE" = "white",
@@ -782,7 +766,7 @@ plot_outcome_discretization_heatmap <- function(
       ),
       guide = "none"
     ) +
-    
+
     # Darker = larger inequality
     scale_fill_gradient(
       low = "grey95",
@@ -790,11 +774,11 @@ plot_outcome_discretization_heatmap <- function(
       limits = c(0, scale_max),
       name = "Maximum\ninequality"
     ) +
-    
+
     scale_x_discrete(
       labels = x_labels
     ) +
-    
+
     labs(
       x = NULL,
       y = NULL,
@@ -808,32 +792,32 @@ plot_outcome_discretization_heatmap <- function(
         " instrument"
       )
     ) +
-    
+
     theme_minimal(base_size = 11) +
-    
+
     theme(
       panel.grid = element_blank(),
-      
+
       axis.text.x = element_text(
         angle = 0,
         hjust = 0.5
       ),
-      
+
       axis.text.y = element_text(
         face = "bold"
       ),
-      
+
       plot.title = element_text(
         face = "bold"
       ),
-      
+
       plot.subtitle = element_text(
         size = 9
       ),
-      
+
       legend.position = "right"
     )
-  
+
   return(p)
 }
 
@@ -844,43 +828,43 @@ plot_outcome_discretization_heatmap <- function(
 ##########################################
 
 run_instrumental_inequalities_singlejointiv <- function(data, y, x, instrument, covariate = NULL) {
-  
+
   # 1. Build the base dataframe
   dat <- data.frame(
     Y  = factor(data[[y]]),
     X  = factor(data[[x]]),
     IV = factor(data[[instrument]])
   )
-  
+
   # 2. Path A: With a Covariate (Stratified)
   if (!is.null(covariate)) {
     dat$C <- factor(data[[covariate]])
-    
+
     # Calculate counts across 4 dimensions: IV, X, Y, Covariate
     cnt_xyzc <- xtabs(~ IV + X + Y + C, data = dat)
-    
+
     # prop.table with margin c(1,4) calculates P(X, Y | IV, C)
     p_xyzc <- prop.table(cnt_xyzc, margin = c(1, 4))
     p_xyzc[!is.finite(p_xyzc)] <- NA_real_
-    
+
     x_levels <- dimnames(p_xyzc)$X
     c_levels <- dimnames(p_xyzc)$C
-    
+
     # Create a grid of all X levels and Covariate levels to iterate through
     xc_grid <- expand.grid(X = seq_along(x_levels), C = seq_along(c_levels))
-    
+
     res <- lapply(seq_len(nrow(xc_grid)), function(r) {
       ix <- xc_grid$X[r]
       ic <- xc_grid$C[r]
-      
+
       mat <- p_xyzc[, ix, , ic]   # Z × Y matrix for this specific X and C level
-      
+
       max_per_y <- apply(mat, 2, function(col) {
         if (all(is.na(col))) 0 else max(col, na.rm = TRUE)
       })
-      
+
       ineq_val <- sum(max_per_y, na.rm = TRUE)
-      
+
       data.frame(
         X = x_levels[ix],
         Covariate_Level = c_levels[ic],
@@ -888,26 +872,26 @@ run_instrumental_inequalities_singlejointiv <- function(data, y, x, instrument, 
         violated = ineq_val > (1 + 1e-8)
       )
     })
-    
+
     # 3. Path B: Without a Covariate (Your Original Logic)
   } else {
     cnt_xyz <- xtabs(~ IV + X + Y, data = dat)
-    
+
     # prop.table with margin 1 calculates P(X, Y | IV)
     p_xyz <- prop.table(cnt_xyz, margin = 1)
     p_xyz[!is.finite(p_xyz)] <- NA_real_
-    
+
     x_levels <- dimnames(p_xyz)$X
-    
+
     res <- lapply(seq_along(x_levels), function(ix) {
       mat <- p_xyz[, ix, ]   # Z × Y matrix
-      
+
       max_per_y <- apply(mat, 2, function(col) {
         if (all(is.na(col))) 0 else max(col, na.rm = TRUE)
       })
-      
+
       ineq_val <- sum(max_per_y, na.rm = TRUE)
-      
+
       data.frame(
         X = x_levels[ix],
         Covariate_Level = NA, # Pad with NA so both paths return the same structure
@@ -916,9 +900,9 @@ run_instrumental_inequalities_singlejointiv <- function(data, y, x, instrument, 
       )
     })
   }
-  
+
   res <- do.call(rbind, res)
-  
+
   list(
     inequalities = res,
     max_value = max(res$inequality_value, na.rm = TRUE),
@@ -950,7 +934,7 @@ y_vars <- c(
 
 instrument_vars <- c(
   "rs11732044_t",
-  "rs116970203_a",          
+  "rs116970203_a",
   "snp_combination",
   "snp_additive"
 )
@@ -963,7 +947,7 @@ k <- 1
 for (instrument in instrument_vars) {
   for (yvar in y_vars) {
     for (xvar in vitd_vars) {
-      
+
       # ---------------------------------------------------------
       # Run instrumental inequalities
       # ---------------------------------------------------------
@@ -973,7 +957,7 @@ for (instrument in instrument_vars) {
         x = xvar,
         instrument = instrument
       )
-      
+
       # ---------------------------------------------------------
       # Complete-case data for this exact G, X, Y specification
       # ---------------------------------------------------------
@@ -984,18 +968,18 @@ for (instrument in instrument_vars) {
           y = .data[[yvar]]
         ) %>%
         tidyr::drop_na()
-      
+
       # Observed category levels in the complete-case data
       z_vals <- unique(cell_data$z)
       x_vals <- unique(cell_data$x)
       y_vals <- unique(cell_data$y)
-      
+
       # ---------------------------------------------------------
       # Observed counts n_zxy
       # ---------------------------------------------------------
       observed_cells <- cell_data %>%
         dplyr::count(z, x, y, name = "cell_n")
-      
+
       # ---------------------------------------------------------
       # Create all X x Y cells within every Z = z contingency table.
       #
@@ -1020,7 +1004,7 @@ for (instrument in instrument_vars) {
         dplyr::mutate(
           # Total N within this instrument-level contingency table
           table_n = sum(cell_n),
-          
+
           # n_zxy / N_z:
           # empirical P(X = x, Y = y | Z = z)
           relative_cell_n = dplyr::if_else(
@@ -1030,7 +1014,7 @@ for (instrument in instrument_vars) {
           )
         ) %>%
         dplyr::ungroup()
-      
+
       # ---------------------------------------------------------
       # One-row summary for each instrument level / Z table
       # ---------------------------------------------------------
@@ -1038,27 +1022,27 @@ for (instrument in instrument_vars) {
         dplyr::group_by(z) %>%
         dplyr::summarise(
           table_n = dplyr::first(table_n),
-          
+
           # Number of possible cells in this X x Y table
           possible_xy_cells = dplyr::n(),
-          
+
           # Empty and non-empty X x Y cells in this Z table
           nonempty_xy_cells = sum(cell_n > 0L),
           empty_xy_cells = sum(cell_n == 0L),
           pct_empty_xy_cells = 100 * mean(cell_n == 0L),
-          
+
           # Very small cells
           singleton_xy_cells = sum(cell_n == 1L),
-          
+
           # Distribution of cell n, including zeros
           min_cell_n = min(cell_n),
           median_cell_n = median(cell_n),
           mean_cell_n = mean(cell_n),
-          
+
           # Distribution among populated cells only
           min_nonzero_cell_n = min(cell_n[cell_n > 0L]),
           median_nonzero_cell_n = median(cell_n[cell_n > 0L]),
-          
+
           # Relative within-Z-table cell population: n_zxy / N_z
           min_nonzero_relative_cell_n = min(
             relative_cell_n[cell_n > 0L]
@@ -1067,27 +1051,27 @@ for (instrument in instrument_vars) {
             relative_cell_n[cell_n > 0L]
           ),
           max_relative_cell_n = max(relative_cell_n),
-          
+
           .groups = "drop"
         )
-      
+
       # ---------------------------------------------------------
       # Store full cell-level and table-level results
       # ---------------------------------------------------------
       spec_name <- paste(instrument, xvar, yvar, sep = "_")
-      
+
       results_raw[[spec_name]] <- list(
         ineq = ineq,
         max_value = ineq$max_value,
         violated = ineq$violated,
-        
+
         # One row per Z x X x Y cell
         cell_counts = all_cells,
-        
+
         # One row per Z level / contingency table
         z_table_summary = z_table_summary
       )
-      
+
       # ---------------------------------------------------------
       # One row per full instrument-exposure-outcome specification
       # ---------------------------------------------------------
@@ -1095,50 +1079,50 @@ for (instrument in instrument_vars) {
         instrument = instrument,
         exposure = xvar,
         outcome = yvar,
-        
+
         instrument_levels = length(z_vals),
         x_levels = length(x_vals),
         y_levels = length(y_vals),
-        
+
         max_value = ineq$max_value,
         violated = ineq$violated,
-        
+
         # Overall N for this specification
         n_complete_cases = nrow(cell_data),
-        
+
         # Number of separate Z-specific X x Y tables
         n_z_tables = dplyr::n_distinct(all_cells$z),
-        
+
         # Each Z table has x_levels * y_levels possible cells
         possible_xy_cells_per_z_table = length(x_vals) * length(y_vals),
-        
+
         # N_z values across instrument levels
         min_table_n = min(z_table_summary$table_n),
         median_table_n = median(z_table_summary$table_n),
         mean_table_n = mean(z_table_summary$table_n),
         max_table_n = max(z_table_summary$table_n),
-        
+
         # Sparsity across Z-specific X x Y tables
         mean_pct_empty_xy_cells = mean(z_table_summary$pct_empty_xy_cells),
         median_pct_empty_xy_cells = median(z_table_summary$pct_empty_xy_cells),
         max_pct_empty_xy_cells = max(z_table_summary$pct_empty_xy_cells),
-        
+
         # Number of singleton cells across all Z-specific tables
         total_singleton_xy_cells = sum(z_table_summary$singleton_xy_cells),
-        
+
         # Smallest non-zero conditional cell probability, n_zxy / N_z
         min_nonzero_relative_cell_n = min(
           z_table_summary$min_nonzero_relative_cell_n
         ),
-        
+
         # Median of the table-specific medians
         median_relative_cell_n = median(
           z_table_summary$median_nonzero_relative_cell_n
         ),
-        
+
         stringsAsFactors = FALSE
       )
-      
+
       k <- k + 1
     }
   }
@@ -1160,7 +1144,7 @@ k <- 1
 for (instrument in instrument_vars) {
   for (yvar in y_vars) {
     for (xvar in vitd_vars) {
-      
+
       # ---------------------------------------------------------
       # Run instrumental inequalities
       # ---------------------------------------------------------
@@ -1171,7 +1155,7 @@ for (instrument in instrument_vars) {
         instrument = instrument,
         covariate = "country"
       )
-      
+
       # ---------------------------------------------------------
       # Complete-case data for this specific country, Z, X, Y analysis
       # ---------------------------------------------------------
@@ -1183,14 +1167,14 @@ for (instrument in instrument_vars) {
           y = .data[[yvar]]
         ) %>%
         tidyr::drop_na()
-      
+
       # ---------------------------------------------------------
       # Observed levels in the exact complete-case dataset
       # ---------------------------------------------------------
       z_vals <- unique(cell_data$z)
       x_vals <- unique(cell_data$x)
       y_vals <- unique(cell_data$y)
-      
+
       # Keep ONLY country × instrument-level combinations
       # that actually occur in the data.
       #
@@ -1198,19 +1182,19 @@ for (instrument in instrument_vars) {
       # country = BEL, z = 3 when no Belgian participant has z = 3.
       observed_country_z_tables <- cell_data %>%
         dplyr::distinct(country, z)
-      
+
       # All possible X × Y cells
       possible_xy_cells <- tidyr::expand_grid(
         x = x_vals,
         y = y_vals
       )
-      
+
       # ---------------------------------------------------------
       # Observed cell counts: n_country,z,x,y
       # ---------------------------------------------------------
       observed_cells <- cell_data %>%
         dplyr::count(country, z, x, y, name = "cell_n")
-      
+
       # ---------------------------------------------------------
       # Create all X × Y cells within each OBSERVED country × Z table
       # ---------------------------------------------------------
@@ -1232,12 +1216,12 @@ for (instrument in instrument_vars) {
           # Total N in the specific country × Z contingency table:
           # N_country,z
           table_n = sum(cell_n),
-          
+
           # n_country,z,x,y / N_country,z
           relative_cell_n = cell_n / table_n
         ) %>%
         dplyr::ungroup()
-      
+
       # ---------------------------------------------------------
       # One row per observed country × instrument-level table
       # ---------------------------------------------------------
@@ -1246,44 +1230,44 @@ for (instrument in instrument_vars) {
         dplyr::summarise(
           # Table sample size: N_country,z
           table_n = dplyr::first(table_n),
-          
+
           # Number of possible X × Y cells
           possible_xy_cells = dplyr::n(),
-          
+
           # Number / percentage of empty cells
           nonempty_xy_cells = sum(cell_n > 0L),
           empty_xy_cells = sum(cell_n == 0L),
           pct_empty_xy_cells = 100 * mean(cell_n == 0L),
-          
+
           # Number of cells containing only one participant
           singleton_xy_cells = sum(cell_n == 1L),
-          
+
           # Relative cell population:
           # n_country,z,x,y / N_country,z
           min_nonzero_relative_cell_n = min(relative_cell_n[cell_n > 0L]),
           median_nonzero_relative_cell_n = median(relative_cell_n[cell_n > 0L]),
           max_relative_cell_n = max(relative_cell_n),
-          
+
           .groups = "drop"
         )
-      
+
       # ---------------------------------------------------------
       # Store full cell-level and table-level results
       # ---------------------------------------------------------
       spec_name <- paste(instrument, xvar, yvar, sep = "_")
-      
+
       results2[[spec_name]] <- list(
         ineq = ineq,
         max_value = ineq$max_value,
         violated = ineq$violated,
-        
+
         # One row per Z x X x Y cell
         cell_counts = all_cells,
-        
+
         # One row per Z level / contingency table
         z_table_summary = z_table_summary
       )
-      
+
       # ---------------------------------------------------------
       # One row per full instrument-exposure-outcome specification
       # ---------------------------------------------------------
@@ -1291,52 +1275,52 @@ for (instrument in instrument_vars) {
         instrument = instrument,
         exposure = xvar,
         outcome = yvar,
-        
+
         instrument_levels = length(z_vals),
         x_levels = length(x_vals),
         y_levels = length(y_vals),
-        
+
         max_value = ineq$max_value,
         violated = ineq$violated,
-        
+
         # Overall N for this specification
         n_complete_cases = nrow(cell_data),
-        
+
         # Number of separate Z-specific X x Y tables
         n_z_tables = dplyr::n_distinct(
           interaction(all_cells$country, all_cells$z, drop = TRUE)
         ),
-        
+
         # Each Z table has x_levels * y_levels possible cells
         possible_xy_cells_per_z_table = length(x_vals) * length(y_vals),
-        
+
         # N_z values across instrument levels
         min_table_n = min(z_table_summary$table_n),
         median_table_n = median(z_table_summary$table_n),
         mean_table_n = mean(z_table_summary$table_n),
         max_table_n = max(z_table_summary$table_n),
-        
+
         # Sparsity across Z-specific X x Y tables
         mean_pct_empty_xy_cells = mean(z_table_summary$pct_empty_xy_cells),
         median_pct_empty_xy_cells = median(z_table_summary$pct_empty_xy_cells),
         max_pct_empty_xy_cells = max(z_table_summary$pct_empty_xy_cells),
-        
+
         # Number of singleton cells across all Z-specific tables
         total_singleton_xy_cells = sum(z_table_summary$singleton_xy_cells),
-        
+
         # Smallest non-zero conditional cell probability, n_zxy / N_z
         min_nonzero_relative_cell_n = min(
           z_table_summary$min_nonzero_relative_cell_n
         ),
-        
+
         # Median of the table-specific medians
         median_relative_cell_n = median(
           z_table_summary$median_nonzero_relative_cell_n
         ),
-        
+
         stringsAsFactors = FALSE
       )
-      
+
       k <- k + 1
     }
   }
@@ -1350,7 +1334,7 @@ summary_tbl2_C <- dplyr::bind_rows(summary_list2)
 # ===========================================================
 
 # 1. Isolate the data for your chosen country
-test_country <- "HUN" 
+test_country <- "HUN"
 single_country_data <- subset(vit_disc_thesis, country == test_country)
 
 detailed_list_single <- list() # To hold the detailed row-by-row inequalities
@@ -1361,25 +1345,25 @@ k <- 1
 for (instrument in instrument_vars) {
   for (yvar in y_vars) {
     for (xvar in vitd_vars) {
-      
+
       # Run the test
       ineq <- run_instrumental_inequalities_singlejointiv(
-        data = single_country_data, 
+        data = single_country_data,
         y = yvar,
         x = xvar,
         instrument = instrument
       )
-      
+
       # Extract detailed inequalities df and tag with current variables
       detailed_df <- ineq$inequalities
       detailed_df$country <- test_country
       detailed_df$instrument <- instrument
       detailed_df$exposure <- xvar
       detailed_df$outcome <- yvar
-      
+
       # Store in our detailed list
       detailed_list_single[[k]] <- detailed_df
-      
+
       # Store the summary metrics
       summary_list_single[[k]] <- data.frame(
         country = test_country,
@@ -1392,7 +1376,7 @@ for (instrument in instrument_vars) {
         max_value = ineq$max_value,
         violated = ineq$violated
       )
-      
+
       k <- k + 1
     }
   }
@@ -1408,7 +1392,7 @@ summary_tbl_single <- dplyr::bind_rows(summary_list_single)
 
 # 1. Create a helper function for the repetitive styling
 apply_gt_formatting <- function(data, is_grouped = FALSE) {
-  
+
   if (is_grouped) {
     # Grouping logic
     tbl <- data %>%
@@ -1423,7 +1407,7 @@ apply_gt_formatting <- function(data, is_grouped = FALSE) {
     # Standard logic
     tbl <- data %>% gt()
   }
-  
+
   # Apply labels and colors to all tables
   tbl <- tbl %>%
     cols_label(
@@ -1440,19 +1424,15 @@ apply_gt_formatting <- function(data, is_grouped = FALSE) {
       target_columns = everything(),
       fn = scales::col_factor(palette = c("white", "#ffe6e6"), domain = c(FALSE, TRUE))
     )
-  
+
   # Add the instrument label back if it's not grouped
   if (!is_grouped) {
     tbl <- tbl %>% cols_label(instrument = "Instrument")
   }
-  
+
   return(tbl)
 }
 
-# 2. Build the first set of tables
-long_tbl           <- apply_gt_formatting(summary_tbl, is_grouped = FALSE)
-grouped_long_tbl   <- apply_gt_formatting(summary_tbl, is_grouped = TRUE)
-# grouped_long_tbl_c <- apply_gt_formatting(summary_tbl2_C, is_grouped = TRUE)
 
 # 3. Build the second set of tables
 long_tbl2           <- apply_gt_formatting(summary_tbl2, is_grouped = FALSE)
@@ -1545,7 +1525,21 @@ ggplot(plot_data, aes(x = factor(number_of_levels), y = max_value)) +
     strip.text = element_text(face = "bold")
   )
 
+plot_discretization_heatmap(
+  summary_tbl = summary_tbl2,
+  outcome_var = "zmets_binary_median",
+  exposure_seq = vitd_vars,
+  joint_type = "combination",
+  relative = FALSE
+)
 
+plot_discretization_heatmap(
+  summary_tbl = summary_tbl2,
+  outcome_var = "zmets_borel10",
+  exposure_seq = vitd_vars,
+  joint_type = "additive",
+  relative = FALSE
+)
 
 ########################################
 # Investingating Sparsity/Positivity violations
@@ -1560,17 +1554,17 @@ sparsity_by_dimension <- summary_tbl2 %>%
     # Sparsity
     mean_pct_empty_xy_cells = mean(mean_pct_empty_xy_cells),
     median_pct_empty_xy_cells = median(median_pct_empty_xy_cells),
-    
+
     # Percentage of specifications in this tile that violate the inequalities
     pct_violated = 100 * mean(violated, na.rm = TRUE),
-    
+
     # Number of specifications combined in the tile
     n_specifications = n(),
-    
+
     # Other sparsity indicators
     mean_singleton_cells = mean(total_singleton_xy_cells),
     mean_min_table_n = mean(min_table_n),
-    
+
     .groups = "drop"
   ) %>%
   mutate(
@@ -1598,17 +1592,17 @@ sparsity_by_dimension_c <- summary_tbl2_C %>%
     # Sparsity
     mean_pct_empty_xy_cells = mean(mean_pct_empty_xy_cells),
     median_pct_empty_xy_cells = median(median_pct_empty_xy_cells),
-    
+
     # Percentage of specifications in this tile that violate the inequalities
     pct_violated = 100 * mean(violated, na.rm = TRUE),
-    
+
     # Number of specifications combined in the tile
     n_specifications = n(),
-    
+
     # Other sparsity indicators
     mean_singleton_cells = mean(total_singleton_xy_cells),
     mean_min_table_n = mean(min_table_n),
-    
+
     .groups = "drop"
   ) %>%
   mutate(
@@ -1624,7 +1618,7 @@ sparsity_by_dimension_c <- summary_tbl2_C %>%
     )
   )
 
-# Visualisation 
+# Visualisation
 
 raw_instruments <- c(
   "rs11732044_t",
@@ -1656,7 +1650,7 @@ p_sparsity_raw <- sparsity_by_dimension %>%
     ),
     colour = "black",
     size = 3.0,        # ggplot text size is in mm
-    
+
   )+
   facet_wrap(~ instrument, nrow = 1) +
   scale_fill_gradient(
@@ -1675,6 +1669,8 @@ p_sparsity_raw <- sparsity_by_dimension %>%
     panel.grid = element_blank(),
     strip.text = element_text(face = "bold")
   )
+
+p_sparsity_raw
 
 p_sparsity_raw_c <- sparsity_by_dimension_c %>%
   dplyr::filter(instrument %in% raw_instruments) %>%
@@ -1695,7 +1691,7 @@ p_sparsity_raw_c <- sparsity_by_dimension_c %>%
     ),
     colour = "black",
     size = 3.0,        # ggplot text size is in mm
-    
+
   )+
   facet_wrap(~ instrument, nrow = 1) +
   scale_fill_gradient(
@@ -1715,7 +1711,7 @@ p_sparsity_raw_c <- sparsity_by_dimension_c %>%
     strip.text = element_text(face = "bold")
   )
 
-
+p_sparsity_raw_c
 
 p_sparsity_joint_c <- sparsity_by_dimension_c %>%
   dplyr::filter(instrument %in% joint_instruments) %>%
@@ -1735,7 +1731,7 @@ p_sparsity_joint_c <- sparsity_by_dimension_c %>%
       )
     ),
     colour = "black",
-    size = 3.0,        
+    size = 3.0,
   )+
   facet_wrap(~ instrument, nrow = 1) +
   scale_fill_gradient(
@@ -1755,4 +1751,4 @@ p_sparsity_joint_c <- sparsity_by_dimension_c %>%
     strip.text = element_text(face = "bold")
   )
 
-
+p_sparsity_joint_c
